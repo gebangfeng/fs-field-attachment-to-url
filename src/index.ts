@@ -1,4 +1,4 @@
-import { basekit, FieldType, field, FieldComponent, FieldCode, NumberFormatter } from '@lark-opdev/block-basekit-server-api';
+import { basekit, FieldType, field, FieldComponent, FieldCode } from '@lark-opdev/block-basekit-server-api';
 
 const { t } = field;
 
@@ -11,25 +11,22 @@ basekit.addField({
   i18n: {
     messages: {
       'zh-CN': {
-        "param_attachment_label": "选择附件字段",
-        "res_url_label": "附件URL",
-        "res_name_label": "文件名称",
-        "res_size_label": "文件大小(KB)",
-        "res_type_label": "文件类型",
+        "param_attachment_label": "选择需要提取URL的附件字段",
+        "param_format_label": "返回格式",
+        "format_plain": "普通字符串（换行分隔）",
+        "format_array": "JSON数组格式",
       },
       'en-US': {
-        "param_attachment_label": "Select Attachment Field",
-        "res_url_label": "Attachment URL",
-        "res_name_label": "File Name",
-        "res_size_label": "File Size(KB)",
-        "res_type_label": "File Type",
+        "param_attachment_label": "Select attachment field to extract URLs",
+        "param_format_label": "Return Format",
+        "format_plain": "Plain string (line-separated)",
+        "format_array": "JSON array format",
       },
       'ja-JP': {
-        "param_attachment_label": "添付ファイルフィールドを選択",
-        "res_url_label": "添付ファイルURL",
-        "res_name_label": "ファイル名",
-        "res_size_label": "ファイルサイズ(KB)",
-        "res_type_label": "ファイルタイプ",
+        "param_attachment_label": "URLを抽出する添付ファイルフィールドを選択",
+        "param_format_label": "戻り値の形式",
+        "format_plain": "プレーン文字列（改行区切り）",
+        "format_array": "JSON配列形式",
       },
     }
   },
@@ -46,53 +43,29 @@ basekit.addField({
         required: true,
       }
     },
-  ],
-  // 定义捷径的返回结果类型
-  resultType: {
-    type: FieldType.Object,
-    extra: {
-      icon: {
-        light: 'https://lf3-static.bytednsdoc.com/obj/eden-cn/eqgeh7upeubqnulog/link.svg',
+    {
+      key: 'format',
+      label: t('param_format_label'),
+      component: FieldComponent.Radio,
+      props: {
+        options: [
+          { label: t('format_plain'), value: 'plain' },
+          { label: t('format_array'), value: 'array' },
+        ]
       },
-      properties: [
-        {
-          key: 'id',
-          isGroupByKey: true,
-          type: FieldType.Text,
-          label: 'id',
-          hidden: true,
-        },
-        {
-          key: 'url',
-          type: FieldType.Text,
-          label: t('res_url_label'),
-          primary: true,
-        },
-        {
-          key: 'name',
-          type: FieldType.Text,
-          label: t('res_name_label'),
-        },
-        {
-          key: 'size',
-          type: FieldType.Number,
-          label: t('res_size_label'),
-          extra: {
-            formatter: NumberFormatter.DIGITAL_ROUNDED_2,
-          }
-        },
-        {
-          key: 'type',
-          type: FieldType.Text,
-          label: t('res_type_label'),
-        },
-      ],
+      validator: {
+        required: false,
+      }
     },
+  ],
+  // 定义捷径的返回结果类型 - 文本字段
+  resultType: {
+    type: FieldType.Text,
   },
   // formItemParams 为运行时传入的字段参数,对应字段配置里的 formItems
   execute: async (formItemParams, context) => {
     // 获取入参
-    const { attachments } = formItemParams;
+    const { attachments, format } = formItemParams;
 
     /**
      * 为方便查看日志,使用此方法替代console.log
@@ -111,7 +84,7 @@ basekit.addField({
     }
 
     // 入口第一行日志,展示formItemParams和context,方便调试
-    debugLog('=====附件转URL开始=====v1.0', true);
+    debugLog('=====附件转URL开始=====v3.0', true);
 
     try {
       // 检查是否有附件
@@ -119,63 +92,51 @@ basekit.addField({
         debugLog({ '===错误': '未选择附件' });
         return {
           code: FieldCode.Success,
-          data: {
-            id: Date.now().toString(),
-            url: '未选择附件',
-            name: '-',
-            size: 0,
-            type: '-',
-          },
+          data: '未选择附件',
         };
       }
 
-      // 获取第一个附件
-      const attachment = attachments[0];
-      debugLog({ '===附件信息': attachment });
+      debugLog({ '===附件数量': attachments.length, '===附件列表': attachments, '===格式': format });
 
-      // 检查附件是否有效
-      if (!attachment || !attachment.tmp_url) {
-        debugLog({ '===错误': '附件无效或缺少URL' });
+      // 提取所有附件的URL,转成数组
+      const urlArray = attachments
+        .filter((attachment: any) => attachment && attachment.tmp_url)
+        .map((attachment: any) => attachment.tmp_url);
+
+      if (urlArray.length === 0) {
+        debugLog({ '===错误': '所有附件都无效' });
         return {
           code: FieldCode.Success,
-          data: {
-            id: Date.now().toString(),
-            url: '附件无效',
-            name: attachment?.name || '-',
-            size: 0,
-            type: attachment?.type || '-',
-          },
+          data: '[]',
         };
       }
 
-      // 提取附件信息
-      const attachmentUrl = attachment.tmp_url || '';
-      const attachmentName = attachment.name || '未知文件';
-      const attachmentSize = attachment.size || 0;
-      const attachmentType = attachment.type || 'unknown';
+      // 根据用户选择的格式返回不同结果
+      // 默认返回普通字符串（换行分隔）
+      const formatType = format?.value || 'plain';
+      let result: string;
 
-      // 计算文件大小(转换为KB)
-      const sizeInKB = attachmentSize / 1024;
+      if (formatType === 'array') {
+        // JSON数组格式
+        result = JSON.stringify(urlArray, null, 2);
+      } else {
+        // 普通字符串（换行分隔）
+        result = urlArray.join('\n');
+      }
 
       debugLog({
         '===处理成功': {
-          url: attachmentUrl.slice(0, 100) + '...',
-          name: attachmentName,
-          size: sizeInKB,
-          type: attachmentType,
+          totalAttachments: attachments.length,
+          validAttachments: urlArray.length,
+          formatType,
+          resultPreview: result.slice(0, 200) + '...'
         }
       });
 
-      // 返回成功结果
+      // 返回成功结果 - 文本字段返回字符串
       return {
         code: FieldCode.Success,
-        data: {
-          id: attachmentUrl, // 使用URL作为唯一ID
-          url: attachmentUrl,
-          name: attachmentName,
-          size: sizeInKB,
-          type: attachmentType,
-        },
+        data: result,
       };
     } catch (e) {
       // 捕获未知错误
