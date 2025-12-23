@@ -15,18 +15,21 @@ basekit.addField({
         "param_format_label": "返回格式",
         "format_plain": "普通字符串（换行分隔）",
         "format_array": "JSON数组格式",
+        "format_dict": "字典格式（键值对）",
       },
       'en-US': {
         "param_attachment_label": "Select attachment field to extract URLs",
         "param_format_label": "Return Format",
         "format_plain": "Plain string (line-separated)",
         "format_array": "JSON array format",
+        "format_dict": "Dictionary format (key-value pairs)",
       },
       'ja-JP': {
         "param_attachment_label": "URLを抽出する添付ファイルフィールドを選択",
         "param_format_label": "戻り値の形式",
         "format_plain": "プレーン文字列（改行区切り）",
         "format_array": "JSON配列形式",
+        "format_dict": "辞書形式（キーバリューペア）",
       },
     }
   },
@@ -51,6 +54,7 @@ basekit.addField({
         options: [
           { label: t('format_plain'), value: 'plain' },
           { label: t('format_array'), value: 'array' },
+          { label: t('format_dict'), value: 'dict' },
         ]
       },
       validator: {
@@ -118,7 +122,14 @@ basekit.addField({
 
       if (formatType === 'array') {
         // JSON数组格式
-        result = JSON.stringify(urlArray, null, 2);
+        result = JSON.stringify(urlArray);
+      } else if (formatType === 'dict') {
+        // 字典格式（键值对）
+        const dict = urlArray.reduce((acc: any, url: string, index: number) => {
+          acc[`url_${index + 1}`] = url;
+          return acc;
+        }, {});
+        result = JSON.stringify(dict);
       } else {
         // 普通字符串（换行分隔）
         result = urlArray.join('\n');
